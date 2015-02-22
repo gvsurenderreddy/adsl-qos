@@ -39,29 +39,29 @@ if [[ $IFSTATUS == "up" ]]; then
   tc qdisc add dev $IFNAME parent 1:112 handle 112: fq_codel
 
   # Add iptables rules to classify packets
-  function setup_iptables() {
-    CMD=$1
-    LOCALNET=$2
-    $CMD -t mangle -F
-    $CMD -t mangle -X
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET -j MARK --set-mark 1
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p icmp -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK FIN,ACK -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 53 -j MARK --set-mark 2
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 22 -j MARK --set-mark 3
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 80 -j MARK --set-mark 3
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 443 -j MARK --set-mark 3
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 5001 -j MARK --set-mark 3
-    $CMD -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 5001 -j MARK --set-mark 3
+  function ip64tables() {
+    iptables $*
+    ip6tables $*
   }
-  setup_iptables iptables $LOCALNET_IPV4
-  setup_iptables ip6tables $LOCALNET_IPV6
+  ip64tables -t mangle -F
+  ip64tables -t mangle -X
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 5001 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 5001 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 443 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 80 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 22 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 53 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK FIN,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p icmp -j MARK --set-mark 2
+  iptables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark 1
+  ip6tables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark 1
+
 elif [[ $IFSTATUS == "down" ]]; then
   tc qdisc del dev $IFNAME root
   iptables -t mangle -F
