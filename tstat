@@ -1,0 +1,75 @@
+#!/usr/bin/python
+# coding=utf-8
+
+# Base Python File (tstat.py)
+# Created: Mon 06 Apr 2015 10:29:49 PM CEST
+# Version: 1.0
+#
+# This Python script was developped by François-Xavier Thomas.
+# You are free to copy, adapt or modify it.
+# If you do so, however, leave my name somewhere in the credits, I'd appreciate it ;)
+#
+# (ɔ) François-Xavier Thomas <fx.thomas@gmail.com>
+
+import argparse
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("qdisc", help="qdiscs to display", nargs="*")
+parser.add_argument("--interface", "-i", help="network interface to use")
+parser.add_argument("--raw", "-r", help="print raw sent bytes", action="store_true")
+args = parser.parse_args()
+
+
+import subprocess as sp
+import re
+
+
+class QDiscStat(object):
+    def __init__(self):
+        self.lines = []
+
+    def add(self, l):
+        self.lines.append(l.strip())
+
+    @property
+    def interface(self):
+        return next(re.finditer(r"dev (\w+)", self.lines[0])).group(1)
+
+    @property
+    def sent_bytes(self):
+        return int(re.match(r"Sent (\d+) bytes", self.lines[1]).group(1))
+
+    @property
+    def sent_pkts(self):
+        return int(re.match(r"Sent \d+ bytes (\d+) pkt", self.lines[1]).group(1))
+
+    @property
+    def dropped_pkts(self):
+        return int(re.match(r"Sent \d+ bytes \d+pkt (dropped (\d+)", self.lines[1]).group(1))
+
+    @property
+    def qdisc_type(self):
+        return next(re.finditer(r"qdisc (\w+)", self.lines[0])).group(1)
+
+    @property
+    def qdisc_name(self):
+        return next(re.finditer(r"qdisc \w+ ([\w:]+)", self.lines[0])).group(1)
+
+
+tcstat = sp.check_output(["tc", "-s", "qdisc", "ls"]).decode("utf-8")
+stats = []
+for line in tcstat.split("\n"):
+    if not line.strip():
+        continue
+    if not line.startswith(" "):
+        stats.append(QDiscStat())
+    stats[-1].add(line)
+
+if args.interface:
+    stats = [s for s in stats if s.interface == args.interface]
+if args.qdisc:
+    stats = [s for s in stats if s.qdisc_name in args.qdisc]
+for s in stats:
+    if args.raw:
+        print(s.sent_bytes)
+    else:
+        print("{}: {} {} {}".format(s.interface, s.qdisc_type, s.qdisc_name, s.sent_bytes))
