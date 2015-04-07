@@ -69,9 +69,9 @@ if [[ $IFSTATUS == "up" ]]; then
   tc class add dev $IFNAME parent 1:1 classid 1:111 htb rate ${CLASS_3_SPEED}kbps ceil ${MAX_UPLOAD}kbps
   tc class add dev $IFNAME parent 1:1 classid 1:112 htb rate ${CLASS_4_SPEED}kbps ceil ${MAX_UPLOAD}kbps
   tc qdisc add dev $IFNAME parent 1:10 handle 10: fq_codel
-  tc qdisc add dev $IFNAME parent 1:110 handle 110: fq_codel
-  tc qdisc add dev $IFNAME parent 1:111 handle 111: fq_codel
-  tc qdisc add dev $IFNAME parent 1:112 handle 112: fq_codel
+  tc qdisc add dev $IFNAME parent 1:110 handle 110: fq_codel limit 512
+  tc qdisc add dev $IFNAME parent 1:111 handle 111: fq_codel limit 512
+  tc qdisc add dev $IFNAME parent 1:112 handle 112: fq_codel limit 512
 
   # Offload all packet filtering to iptables (I found it much easier to use
   # than tc filters).
