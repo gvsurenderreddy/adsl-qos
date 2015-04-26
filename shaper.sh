@@ -93,6 +93,8 @@ if [[ $IFSTATUS == "up" ]]; then
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 22 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 53 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 1723 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p gre -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
