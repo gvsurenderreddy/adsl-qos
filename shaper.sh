@@ -21,7 +21,7 @@ IFSTATUS=$2      # Interface status (up or down)
 # Note that if this is greater than the available bandwidth, the traffic will
 # be shaped by the network's limiting node instead of this script (usually your
 # ISP's modem/router).
-MAX_UPLOAD=100
+MAX_UPLOAD=85
 
 # Percentage of the maximum upload bandwidth reserved for each class:
 #  * Class 1 for local (or really, really important) traffic
