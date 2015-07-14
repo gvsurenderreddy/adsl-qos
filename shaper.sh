@@ -55,63 +55,97 @@ if [[ $IFSTATUS == "up" ]]; then
   sysctl net.ipv6.conf.default.forwarding=1
   sysctl net.ipv6.conf.all.forwarding=1
 
-  # Setup HTB (Hierarchical Token Bucket) to limit bandwidth for each class of
-  # traffic, as described above.
+  # Compute speeds for each class
   CLASS_2_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_2_PERCENT)
   CLASS_3_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_3_PERCENT)
   CLASS_4_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_4_PERCENT)
+
+  # Create or replace the root qdisc by an HTB qdisc, defaulting to the class
+  # with the least important priority (1:112).
   tc qdisc del dev $IFNAME root
   tc qdisc add dev $IFNAME root handle 1: htb default 112
-  tc class add dev $IFNAME parent 1: classid 1:1 htb rate 1gbit ceil 1gbit
-  tc class add dev $IFNAME parent 1:0 classid 1:10 htb rate 999mbit ceil 1gbit
-  tc class add dev $IFNAME parent 1:0 classid 1:11 htb rate ${MAX_UPLOAD}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:1 classid 1:110 htb rate ${CLASS_2_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:1 classid 1:111 htb rate ${CLASS_3_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:1 classid 1:112 htb rate ${CLASS_4_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc qdisc add dev $IFNAME parent 1:10 handle 10: fq_codel
-  tc qdisc add dev $IFNAME parent 1:110 handle 110: fq_codel limit 512
-  tc qdisc add dev $IFNAME parent 1:111 handle 111: fq_codel limit 512
-  tc qdisc add dev $IFNAME parent 1:112 handle 112: fq_codel limit 512
 
-  # Offload all packet filtering to iptables (I found it much easier to use
-  # than tc filters).
-  tc filter add dev $IFNAME protocol ip parent 1: prio 1 handle 1 fw flowid 1:10   # Local traffic
-  tc filter add dev $IFNAME protocol ip parent 1: prio 2 handle 2 fw flowid 1:110  # Priority traffic
-  tc filter add dev $IFNAME protocol ip parent 1: prio 3 handle 3 fw flowid 1:111  # Important traffic
-  tc filter add dev $IFNAME protocol ip parent 1: prio 4 handle 4 fw flowid 1:112  # All the rest
+  # Create the root classs, i.e. the ones that are attached to the root qdisc
+  # directly. Root classes cannot borrow bandwidth from another root class, so
+  # they are well-suited for separating local and internet traffic.
+  #
+  # Each tc class is written x:y, where x is the qdisc id, and y the class id.
+  # Here, we create one class (1:10) for local traffic and another (1:11) for
+  # internet traffic.
+  tc class add dev $IFNAME parent 1: classid 1:10 htb rate 1gbit
+  tc class add dev $IFNAME parent 1: classid 1:11 htb rate ${MAX_UPLOAD}kbps
 
-  # Add iptables rules to classify packets, in reverse priority order (since
-  # the packet mark is overwritten on each call to --set-mark).
+  # The local traffic should be more than fine without supervision, but the
+  # internet traffic needs some prioritization. We create subclasses of the
+  # root internet class, each able to borrow from the others if there is enough
+  # available bandwidth.
+  tc class add dev $IFNAME parent 1:11 classid 1:110 htb rate ${CLASS_2_SPEED}kbps ceil ${MAX_UPLOAD}kbps
+  tc class add dev $IFNAME parent 1:11 classid 1:111 htb rate ${CLASS_3_SPEED}kbps ceil ${MAX_UPLOAD}kbps
+  tc class add dev $IFNAME parent 1:11 classid 1:112 htb rate ${CLASS_4_SPEED}kbps ceil ${MAX_UPLOAD}kbps
+
+  # Add SFQ (Stochastic Fairness Queuing) to each leaf
+  tc qdisc add dev $IFNAME parent 1:10 handle 10: sfq perturb 10
+  tc qdisc add dev $IFNAME parent 1:110 handle 110: sfq perturb 10
+  tc qdisc add dev $IFNAME parent 1:111 handle 111: sfq perturb 10
+  tc qdisc add dev $IFNAME parent 1:112 handle 112: sfq perturb 10
+
+  # Direct packets to the relevant class
+  tc filter add dev $IFNAME parent 1: prio 100 handle 1 fw flowid 1:10
+  tc filter add dev $IFNAME parent 1: prio 300 handle 2 fw flowid 1:110
+  tc filter add dev $IFNAME parent 1: prio 400 handle 3 fw flowid 1:111
+  tc filter add dev $IFNAME parent 1: prio 500 handle 4 fw flowid 1:112
+
+  # Clear iptables rules
   ip64tables -t mangle -F
   ip64tables -t mangle -X
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 5001 -j MARK --set-mark 3
+  ip64tables -t raw -F
+  ip64tables -t raw -X
+
+  # Priority 4: Match low-priority packets
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -j MARK --set-mark 4
+
+  # Priority 3: Match intermediate-priority packets
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p gre -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 1723 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 1723 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 5001 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 5001 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 993 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 443 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 443 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 4443 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 4443 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 80 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 80 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 22 -j MARK --set-mark 3
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
+
+  # Priority 2: Match high-priority packets (ICMP, DNS and small FIN/ACK/SYN)
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 53 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 1723 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p gre -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK FIN,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --match multiport --dports 0:1024 --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK FIN,ACK -j MARK --set-mark 2
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p icmp -j MARK --set-mark 2
+
+  # Priority 1: Match local packets
   iptables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark 1
   ip6tables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark 1
+
+  # Packet tracing
+  # ip64tables -A PREROUTING -t raw -p tcp --dport 5001 -j TRACE
+  # ip64tables -A OUTPUT -t raw -o $IFNAME -p tcp --dport 5001 -j TRACE
 
 # If the interface is being brought down, clear all traffic shaping rules.
 elif [[ $IFSTATUS == "down" ]]; then
   tc qdisc del dev $IFNAME root
-  iptables -t mangle -F
-  iptables -t mangle -X
-  ip6tables -t mangle -F
-  ip6tables -t mangle -X
+  ip64tables -t mangle -F
+  ip64tables -t mangle -X
+  ip64tables -t raw -F
+  ip64tables -t raw -X
 
 # If the status is anything else, exit with an error.
 else
