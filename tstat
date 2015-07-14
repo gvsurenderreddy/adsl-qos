@@ -13,8 +13,8 @@
 
 import argparse
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("qdisc", help="qdiscs to display", nargs="*")
-parser.add_argument("--interface", "-i", help="network interface to use")
+parser.add_argument("classes", help="classes to display", nargs="*")
+parser.add_argument("--interface", "-i", help="network interface to use", default="enp3s0")
 parser.add_argument("--raw", "-r", help="print raw sent bytes", action="store_true")
 args = parser.parse_args()
 
@@ -31,10 +31,6 @@ class QDiscStat(object):
         self.lines.append(l.strip())
 
     @property
-    def interface(self):
-        return next(re.finditer(r"dev (\w+)", self.lines[0])).group(1)
-
-    @property
     def sent_bytes(self):
         return int(re.match(r"Sent (\d+) bytes", self.lines[1]).group(1))
 
@@ -47,15 +43,15 @@ class QDiscStat(object):
         return int(re.match(r"Sent \d+ bytes \d+pkt (dropped (\d+)", self.lines[1]).group(1))
 
     @property
-    def qdisc_type(self):
-        return next(re.finditer(r"qdisc (\w+)", self.lines[0])).group(1)
+    def class_type(self):
+        return next(re.finditer(r"class (\w+)", self.lines[0])).group(1)
 
     @property
-    def qdisc_name(self):
-        return next(re.finditer(r"qdisc \w+ ([\w:]+)", self.lines[0])).group(1)
+    def class_name(self):
+        return next(re.finditer(r"class \w+ ([\w:]+)", self.lines[0])).group(1)
 
 
-tcstat = sp.check_output(["tc", "-s", "qdisc", "ls"]).decode("utf-8")
+tcstat = sp.check_output(["tc", "-s", "class", "ls", "dev", args.interface]).decode("utf-8")
 stats = []
 for line in tcstat.split("\n"):
     if not line.strip():
@@ -63,13 +59,10 @@ for line in tcstat.split("\n"):
     if not line.startswith(" "):
         stats.append(QDiscStat())
     stats[-1].add(line)
-
-if args.interface:
-    stats = [s for s in stats if s.interface == args.interface]
-if args.qdisc:
-    stats = [s for s in stats if s.qdisc_name in args.qdisc]
+if args.classes:
+    stats = [s for s in stats if s.class_name in args.classes]
 for s in stats:
     if args.raw:
         print(s.sent_bytes)
     else:
-        print("{}: {} {} {}".format(s.interface, s.qdisc_type, s.qdisc_name, s.sent_bytes))
+        print("{} {} {}".format(s.class_type, s.class_name, s.sent_bytes))
