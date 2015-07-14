@@ -31,6 +31,7 @@ MAX_UPLOAD=85
 MAX_CLASS_2_PERCENT=0.1
 MAX_CLASS_3_PERCENT=0.8
 MAX_CLASS_4_PERCENT=0.1
+MAX_CLASS_5_PERCENT=0.0
 
 # Local networks to use when filtering local packets.
 LOCALNET_IPV4=192.168.1.0/24
@@ -59,6 +60,7 @@ if [[ $IFSTATUS == "up" ]]; then
   CLASS_2_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_2_PERCENT)
   CLASS_3_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_3_PERCENT)
   CLASS_4_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_4_PERCENT)
+  CLASS_5_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_5_PERCENT)
 
   # Create or replace the root qdisc by an HTB qdisc, defaulting to the class
   # with the least important priority (1:112).
@@ -82,18 +84,21 @@ if [[ $IFSTATUS == "up" ]]; then
   tc class add dev $IFNAME parent 1:11 classid 1:110 htb rate ${CLASS_2_SPEED}kbps ceil ${MAX_UPLOAD}kbps
   tc class add dev $IFNAME parent 1:11 classid 1:111 htb rate ${CLASS_3_SPEED}kbps ceil ${MAX_UPLOAD}kbps
   tc class add dev $IFNAME parent 1:11 classid 1:112 htb rate ${CLASS_4_SPEED}kbps ceil ${MAX_UPLOAD}kbps
+  tc class add dev $IFNAME parent 1:11 classid 1:113 htb rate 5kbps ceil ${MAX_UPLOAD}kbps
 
   # Add SFQ (Stochastic Fairness Queuing) to each leaf
   tc qdisc add dev $IFNAME parent 1:10 handle 10: sfq perturb 10
   tc qdisc add dev $IFNAME parent 1:110 handle 110: sfq perturb 10
   tc qdisc add dev $IFNAME parent 1:111 handle 111: sfq perturb 10
   tc qdisc add dev $IFNAME parent 1:112 handle 112: sfq perturb 10
+  tc qdisc add dev $IFNAME parent 1:113 handle 113: sfq perturb 10
 
   # Direct packets to the relevant class
   tc filter add dev $IFNAME parent 1: prio 100 handle 1 fw flowid 1:10
   tc filter add dev $IFNAME parent 1: prio 300 handle 2 fw flowid 1:110
   tc filter add dev $IFNAME parent 1: prio 400 handle 3 fw flowid 1:111
   tc filter add dev $IFNAME parent 1: prio 500 handle 4 fw flowid 1:112
+  tc filter add dev $IFNAME parent 1: prio 600 handle 5 fw flowid 1:113
 
   # Clear iptables rules
   ip64tables -t mangle -F
@@ -130,6 +135,9 @@ if [[ $IFSTATUS == "up" ]]; then
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
   ip64tables -A POSTROUTING -t mangle -o $IFNAME -p icmp -j MARK --set-mark 2
+
+  # Priority 5: Bittorrent traffic
+  ip64tables -A POSTROUTING -t mangle -o $IFNAME -m owner --uid-owner transmission -j MARK --set-mark 5
 
   # Priority 1: Match local packets
   iptables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark 1
