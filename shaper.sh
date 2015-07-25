@@ -52,14 +52,19 @@ function ip64tables() {
 function ip64tables_clear() {
   ip64tables -t mangle -F shaping
   ip64tables -t mangle -X shaping
+  ip64tables -t mangle -D POSTROUTING -j CONNMARK --restore-mark
   ip64tables -t mangle -D POSTROUTING -j shaping
+  ip64tables -t mangle -D POSTROUTING -j CONNMARK --save-mark
 }
 
 # Initialize shaping rules
 function ip64tables_init() {
   ip64tables_clear
   ip64tables -t mangle -N shaping
+  ip64tables -t mangle -A POSTROUTING -j CONNMARK --restore-mark
   ip64tables -t mangle -A POSTROUTING -j shaping
+  ip64tables -t mangle -A POSTROUTING -j CONNMARK --save-mark
+  accept_mark
 }
 
 # Filter packets for both IPv4 and IPv6
@@ -73,8 +78,22 @@ function accept_mark() {
   ip64tables -t mangle -A shaping -m mark ! --mark 0 -j RETURN
 }
 
+# Create a new TC class with the ceil parameter being the same as the rate
+# parameter.
+#
+# Usage: create_max_class <name> <rate> [parent]
+function create_max_class() {
+  CLASS_NAME=$1
+  CLASS_RATE=$2
+  CLASS_PARENT=$3
+  tc class add dev $IFNAME parent 1:${CLASS_PARENT} classid 1:${CLASS_NAME} htb rate ${CLASS_RATE} ceil ${CLASS_RATE}
+  tc qdisc add dev $IFNAME parent 1:${CLASS_NAME} handle ${CLASS_NAME}: sfq perturb 10
+  tc filter add dev $IFNAME parent 1: prio ${CLASS_NAME} handle ${CLASS_NAME} fw flowid 1:${CLASS_NAME}
+}
+
 # Create a new TC class
-# Usage: create_class <parent> <name> <rate>
+#
+# Usage: create_class <name> <rate> [parent]
 function create_class() {
   CLASS_NAME=$1
   CLASS_RATE=$2
@@ -105,7 +124,7 @@ if [[ $IFSTATUS == "up" ]]; then
   # Each tc class is written x:y, where x is the qdisc id, and y the class id.
   # Here, we create one class (1:10) for local traffic and another (1:11) for
   # internet traffic.
-  create_class $CLASS_LAN 1gbit
+  create_max_class $CLASS_LAN 1gbit
   create_class $CLASS_WAN ${MAX_UPLOAD}kbps
 
   # The local traffic should be more than fine without supervision, but the
@@ -129,11 +148,6 @@ if [[ $IFSTATUS == "up" ]]; then
 
   # Initialize iptable rules
   ip64tables_init
-
-  # Restore connection marks and return immediately if the packet is already
-  # marked.
-  rule -j CONNMARK --restore-mark
-  accept_mark
 
   # Priority 1: Match local packets.
   iptables  -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark $CLASS_LAN
@@ -176,7 +190,6 @@ if [[ $IFSTATUS == "up" ]]; then
   # Priority 4: Match low-priority packets with the default class, and save the
   # final connection mark.
   rule -j MARK --set-mark $CLASS_WAN3
-  rule -j CONNMARK --save-mark
 
   # Packet tracing
   # ip64tables -A PREROUTING -t raw -p tcp --dport 5001 -j TRACE
