@@ -111,7 +111,7 @@ if [[ $IFSTATUS == "up" ]]; then
   # Create or replace the root qdisc by an HTB qdisc, defaulting to the class
   # with the least important priority (1:112).
   tc qdisc del dev $IFNAME root
-  tc qdisc add dev $IFNAME root handle 1: htb default $CLASS_WAN2
+  tc qdisc add dev $IFNAME root handle 1: htb default $CLASS_WAN2 r2q 1
 
   # Create the root classs, i.e. the ones that are attached to the root qdisc
   # directly. Root classes cannot borrow bandwidth from another root class, so
