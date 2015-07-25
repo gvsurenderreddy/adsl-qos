@@ -154,6 +154,10 @@ if [[ $IFSTATUS == "up" ]]; then
   ip6tables -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark $CLASS_LAN
   accept_mark
 
+  # Priority 5: Bittorrent traffic
+  rule -m owner --uid-owner transmission -j MARK --set-mark $CLASS_WAN4
+  accept_mark
+
   # Priority 2: Match high-priority packets (ICMP, DNS and small FIN/ACK/SYN).
   rule -p tcp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
   rule -p udp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
@@ -181,10 +185,6 @@ if [[ $IFSTATUS == "up" ]]; then
   rule -p tcp --sport 80   -j MARK --set-mark $CLASS_WAN2_WEB
   rule -p tcp --dport 22   -j MARK --set-mark $CLASS_WAN2_SSH
   rule -p tcp --sport 22   -j MARK --set-mark $CLASS_WAN2_SSH
-  accept_mark
-
-  # Priority 5: The lowest-priority class is evaluated before the default mark.
-  rule -m owner --uid-owner transmission -j MARK --set-mark $CLASS_WAN4
   accept_mark
 
   # Priority 4: Match low-priority packets with the default class, and save the
