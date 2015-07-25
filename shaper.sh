@@ -52,18 +52,14 @@ function ip64tables() {
 function ip64tables_clear() {
   ip64tables -t mangle -F shaping
   ip64tables -t mangle -X shaping
-  ip64tables -t mangle -D POSTROUTING -j CONNMARK --restore-mark
   ip64tables -t mangle -D POSTROUTING -j shaping
-  ip64tables -t mangle -D POSTROUTING -j CONNMARK --save-mark
 }
 
 # Initialize shaping rules
 function ip64tables_init() {
   ip64tables_clear
   ip64tables -t mangle -N shaping
-  ip64tables -t mangle -A POSTROUTING -j CONNMARK --restore-mark
   ip64tables -t mangle -A POSTROUTING -j shaping
-  ip64tables -t mangle -A POSTROUTING -j CONNMARK --save-mark
   accept_mark
 }
 
