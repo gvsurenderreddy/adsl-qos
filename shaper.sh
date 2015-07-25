@@ -16,22 +16,24 @@ IFSTATUS=$2      # Interface status (up or down)
 # General settings #
 ####################
 
-# Maximum bandwidth allocated to the uplink, in kbps.
-#
-# Note that if this is greater than the available bandwidth, the traffic will
-# be shaped by the network's limiting node instead of this script (usually your
-# ISP's modem/router).
+# Maximum upload speed (in kbps)
 MAX_UPLOAD=85
 
-# Percentage of the maximum upload bandwidth reserved for each class:
-#  * Class 1 for local (or really, really important) traffic
-#  * Class 2 for priority traffic (ACKs, DNS resolution,...)
-#  * Class 3 for important traffic (SSH, web browsing,...)
-#  * Class 4 for all other traffic
-MAX_CLASS_2_PERCENT=0.1
-MAX_CLASS_3_PERCENT=0.8
-MAX_CLASS_4_PERCENT=0.1
-MAX_CLASS_5_PERCENT=0.0
+# Pretty names for each class
+CLASS_LAN=10
+CLASS_WAN=11
+CLASS_WAN1=110
+CLASS_WAN2=130
+CLASS_WAN3=150
+CLASS_WAN4=170
+CLASS_WAN1_DNS=111
+CLASS_WAN1_TCP=112
+CLASS_WAN1_OTHERS=129
+CLASS_WAN2_WEB=131
+CLASS_WAN2_SSH=132
+CLASS_WAN2_SUBSONIC=133
+CLASS_WAN2_MAIL=134
+CLASS_WAN2_OTHERS=149
 
 # Local networks to use when filtering local packets.
 LOCALNET_IPV4=192.168.1.0/24
@@ -41,10 +43,45 @@ LOCALNET_IPV6=fe80::
 # Main script #
 ###############
 
-# Utility function to filter packets on both IPv4 and IPv6 traffic.
 function ip64tables() {
   iptables $*
   ip6tables $*
+}
+
+# Clear iptables rules
+function ip64tables_clear() {
+  ip64tables -t mangle -F shaping
+  ip64tables -t mangle -X shaping
+  ip64tables -t mangle -D POSTROUTING -j shaping
+}
+
+# Initialize shaping rules
+function ip64tables_init() {
+  ip64tables_clear
+  ip64tables -t mangle -N shaping
+  ip64tables -t mangle -A POSTROUTING -j shaping
+}
+
+# Filter packets for both IPv4 and IPv6
+function rule() {
+  ip64tables -t mangle -A shaping -o $IFNAME $*
+}
+
+# Accept marked packets and return from the iptables chain without processing
+# other rules.
+function accept_mark() {
+  ip64tables -t mangle -A shaping -m mark ! --mark 0 -j RETURN
+}
+
+# Create a new TC class
+# Usage: create_class <parent> <name> <rate>
+function create_class() {
+  CLASS_NAME=$1
+  CLASS_RATE=$2
+  CLASS_PARENT=$3
+  tc class add dev $IFNAME parent 1:${CLASS_PARENT} classid 1:${CLASS_NAME} htb rate ${CLASS_RATE} ceil ${MAX_UPLOAD}kbps
+  tc qdisc add dev $IFNAME parent 1:${CLASS_NAME} handle ${CLASS_NAME}: sfq perturb 10
+  tc filter add dev $IFNAME parent 1: prio ${CLASS_NAME} handle ${CLASS_NAME} fw flowid 1:${CLASS_NAME}
 }
 
 # If the interface is being brought up, then clear all existing rules and setup
@@ -56,16 +93,10 @@ if [[ $IFSTATUS == "up" ]]; then
   sysctl net.ipv6.conf.default.forwarding=1
   sysctl net.ipv6.conf.all.forwarding=1
 
-  # Compute speeds for each class
-  CLASS_2_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_2_PERCENT)
-  CLASS_3_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_3_PERCENT)
-  CLASS_4_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_4_PERCENT)
-  CLASS_5_SPEED=$(bc <<< $MAX_UPLOAD*$MAX_CLASS_5_PERCENT)
-
   # Create or replace the root qdisc by an HTB qdisc, defaulting to the class
   # with the least important priority (1:112).
   tc qdisc del dev $IFNAME root
-  tc qdisc add dev $IFNAME root handle 1: htb default 112
+  tc qdisc add dev $IFNAME root handle 1: htb default $CLASS_WAN2
 
   # Create the root classs, i.e. the ones that are attached to the root qdisc
   # directly. Root classes cannot borrow bandwidth from another root class, so
@@ -74,74 +105,78 @@ if [[ $IFSTATUS == "up" ]]; then
   # Each tc class is written x:y, where x is the qdisc id, and y the class id.
   # Here, we create one class (1:10) for local traffic and another (1:11) for
   # internet traffic.
-  tc class add dev $IFNAME parent 1: classid 1:10 htb rate 1gbit
-  tc class add dev $IFNAME parent 1: classid 1:11 htb rate ${MAX_UPLOAD}kbps
+  create_class $CLASS_LAN 1gbit
+  create_class $CLASS_WAN ${MAX_UPLOAD}kbps
 
   # The local traffic should be more than fine without supervision, but the
   # internet traffic needs some prioritization. We create subclasses of the
   # root internet class, each able to borrow from the others if there is enough
   # available bandwidth.
-  tc class add dev $IFNAME parent 1:11 classid 1:110 htb rate ${CLASS_2_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:11 classid 1:111 htb rate ${CLASS_3_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:11 classid 1:112 htb rate ${CLASS_4_SPEED}kbps ceil ${MAX_UPLOAD}kbps
-  tc class add dev $IFNAME parent 1:11 classid 1:113 htb rate 5kbps ceil ${MAX_UPLOAD}kbps
+  create_class $CLASS_WAN1 10kbps  ${CLASS_WAN}
+  create_class $CLASS_WAN2 70kbps  ${CLASS_WAN}
+  create_class $CLASS_WAN3 5kbps   ${CLASS_WAN}
+  create_class $CLASS_WAN4 5kbps   ${CLASS_WAN}
 
-  # Add SFQ (Stochastic Fairness Queuing) to each leaf
-  tc qdisc add dev $IFNAME parent 1:10 handle 10: sfq perturb 10
-  tc qdisc add dev $IFNAME parent 1:110 handle 110: sfq perturb 10
-  tc qdisc add dev $IFNAME parent 1:111 handle 111: sfq perturb 10
-  tc qdisc add dev $IFNAME parent 1:112 handle 112: sfq perturb 10
-  tc qdisc add dev $IFNAME parent 1:113 handle 113: sfq perturb 10
+  # Traffic-specific classes
+  create_class $CLASS_WAN1_DNS        1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN1_TCP        1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN1_OTHERS     1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN2_WEB        1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_SSH        1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_SUBSONIC   1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_MAIL       1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_OTHERS     1kbps   $CLASS_WAN2
 
-  # Direct packets to the relevant class
-  tc filter add dev $IFNAME parent 1: prio 100 handle 1 fw flowid 1:10
-  tc filter add dev $IFNAME parent 1: prio 300 handle 2 fw flowid 1:110
-  tc filter add dev $IFNAME parent 1: prio 400 handle 3 fw flowid 1:111
-  tc filter add dev $IFNAME parent 1: prio 500 handle 4 fw flowid 1:112
-  tc filter add dev $IFNAME parent 1: prio 600 handle 5 fw flowid 1:113
+  # Initialize iptable rules
+  ip64tables_init
 
-  # Clear iptables rules
-  ip64tables -t mangle -F
-  ip64tables -t mangle -X
-  ip64tables -t raw -F
-  ip64tables -t raw -X
+  # Restore connection marks and return immediately if the packet is already
+  # marked.
+  rule -j CONNMARK --restore-mark
+  accept_mark
 
-  # Priority 4: Match low-priority packets
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -j MARK --set-mark 4
+  # Priority 1: Match local packets.
+  iptables  -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark $CLASS_LAN
+  ip6tables -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark $CLASS_LAN
+  accept_mark
 
-  # Priority 3: Match intermediate-priority packets
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p gre -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 1723 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 1723 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 5001 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 5001 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 993 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 443 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 443 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 4443 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 4443 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 80 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 80 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 22 -j MARK --set-mark 3
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --sport 22 -j MARK --set-mark 3
+  # Priority 2: Match high-priority packets (ICMP, DNS and small FIN/ACK/SYN).
+  rule -p tcp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
+  rule -p udp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
+  rule -p icmp           -j MARK --set-mark $CLASS_WAN1_OTHERS
+  accept_mark
+  rule -p tcp --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:60 -j MARK --set-mark $CLASS_WAN1_TCP
+  rule -p tcp --tcp-flags FIN,SYN,RST,ACK RST,ACK                     -j MARK --set-mark $CLASS_WAN1_TCP
+  rule -p tcp --tcp-flags FIN,SYN,RST,ACK SYN,ACK                     -j MARK --set-mark $CLASS_WAN1_TCP
+  rule -p tcp --tcp-flags FIN,SYN,RST,ACK FIN,ACK                     -j MARK --set-mark $CLASS_WAN1_TCP
+  rule -p tcp --tcp-flags FIN,SYN,RST,ACK RST                         -j MARK --set-mark $CLASS_WAN1_TCP
+  accept_mark
 
-  # Priority 2: Match high-priority packets (ICMP, DNS and small FIN/ACK/SYN)
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --dport 53 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:40 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK RST,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK SYN,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK FIN,ACK -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p tcp --tcp-flags FIN,SYN,RST,ACK RST -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p udp --dport 53 -j MARK --set-mark 2
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -p icmp -j MARK --set-mark 2
+  # Priority 3: Match intermediate-priority packets.
+  rule -p gre              -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p tcp --dport 1723 -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p tcp --sport 1723 -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p tcp --dport 5001 -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p udp --dport 5001 -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p tcp --dport 993  -j MARK --set-mark $CLASS_WAN2_MAIL
+  rule -p tcp --dport 443  -j MARK --set-mark $CLASS_WAN2_WEB
+  rule -p tcp --sport 443  -j MARK --set-mark $CLASS_WAN2_WEB
+  rule -p tcp --dport 4443 -j MARK --set-mark $CLASS_WAN2_SUBSONIC
+  rule -p tcp --sport 4443 -j MARK --set-mark $CLASS_WAN2_SUBSONIC
+  rule -p tcp --dport 80   -j MARK --set-mark $CLASS_WAN2_WEB
+  rule -p tcp --sport 80   -j MARK --set-mark $CLASS_WAN2_WEB
+  rule -p tcp --dport 22   -j MARK --set-mark $CLASS_WAN2_SSH
+  rule -p tcp --sport 22   -j MARK --set-mark $CLASS_WAN2_SSH
+  accept_mark
 
-  # Priority 5: Bittorrent traffic
-  ip64tables -A POSTROUTING -t mangle -o $IFNAME -m owner --uid-owner transmission -j MARK --set-mark 5
+  # Priority 5: The lowest-priority class is evaluated before the default mark.
+  rule -m owner --uid-owner transmission -j MARK --set-mark $CLASS_WAN4
+  accept_mark
 
-  # Priority 1: Match local packets
-  iptables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark 1
-  ip6tables -A POSTROUTING -t mangle -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark 1
+  # Priority 4: Match low-priority packets with the default class, and save the
+  # final connection mark.
+  rule -j MARK --set-mark $CLASS_WAN3
+  rule -j CONNMARK --save-mark
 
   # Packet tracing
   # ip64tables -A PREROUTING -t raw -p tcp --dport 5001 -j TRACE
@@ -150,10 +185,8 @@ if [[ $IFSTATUS == "up" ]]; then
 # If the interface is being brought down, clear all traffic shaping rules.
 elif [[ $IFSTATUS == "down" ]]; then
   tc qdisc del dev $IFNAME root
-  ip64tables -t mangle -F
-  ip64tables -t mangle -X
-  ip64tables -t raw -F
-  ip64tables -t raw -X
+  ip64tables_clear
+
 
 # If the status is anything else, exit with an error.
 else

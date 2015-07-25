@@ -51,7 +51,7 @@ class QDiscStat(object):
         return next(re.finditer(r"class \w+ ([\w:]+)", self.lines[0])).group(1)
 
 
-tcstat = sp.check_output(["tc", "-s", "class", "ls", "dev", args.interface]).decode("utf-8")
+tcstat = sp.check_output(["tc", "-nm", "-s", "class", "ls", "dev", args.interface]).decode("utf-8")
 stats = []
 for line in tcstat.split("\n"):
     if not line.strip():
@@ -62,6 +62,10 @@ for line in tcstat.split("\n"):
 if args.classes:
     stats = [s for s in stats if s.class_name in args.classes]
 for s in stats:
+    if s.class_type != "htb":
+        continue
+    if args.classes and s.class_name not in args.classes:
+        continue
     if args.raw:
         print(s.sent_bytes)
     else:
