@@ -110,7 +110,7 @@ if [[ $IFSTATUS == "up" ]]; then
 
   # Create or replace the root qdisc by an HTB qdisc, defaulting to the class
   # with the least important priority (1:112).
-  tc qdisc del dev $IFNAME root
+  tc qdisc del dev $IFNAME root 2> /dev/null
   tc qdisc add dev $IFNAME root handle 1: htb default $CLASS_WAN2 r2q 1
 
   # Create the root classs, i.e. the ones that are attached to the root qdisc
@@ -193,7 +193,7 @@ if [[ $IFSTATUS == "up" ]]; then
 
 # If the interface is being brought down, clear all traffic shaping rules.
 elif [[ $IFSTATUS == "down" ]]; then
-  tc qdisc del dev $IFNAME root
+  tc qdisc del dev $IFNAME root 2> /dev/null
   ip64tables_clear
 
 
