@@ -26,3 +26,21 @@ Included are 3 files for monitoring traffic statistics with
 * `zabbix_template.xml` adds a _Traffic shaping_ template that automatically
   adds items for every running traffic class defined in `tc_cls` using the
   `tstat` command.
+
+# Configuration
+
+Your network characteristics will most probably not match mine (roughly 5M
+down, 700k up). The most important thing to edit is your maximum upload
+bandwith, defined in the `MAX_UPLOAD` variable.
+
+If your local network is not `192.168.1.0/24`, you also need to replace the
+`LOCALNET_IPV4` variable by your own ip/mask.
+
+Additionally, you can edit the reserved rate for each priority class (`WAN1-4`)
+later in the file. Keep in mind that each class can borrow from the others if
+necessary; these rates represent the minimum reserved bandwith for each class:
+
+    create_class $CLASS_WAN1 10kbps  ${CLASS_WAN}
+    create_class $CLASS_WAN2 70kbps  ${CLASS_WAN}
+    create_class $CLASS_WAN3 5kbps   ${CLASS_WAN}
+    create_class $CLASS_WAN4 5kbps   ${CLASS_WAN}
