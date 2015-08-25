@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <zabbix_export>
     <version>2.0</version>
-    <date>2015-08-25T18:37:58Z</date>
+    <date>2015-08-25T21:20:35Z</date>
     <groups>
         <group>
             <name>Templates</name>
@@ -25,12 +25,12 @@
             <items/>
             <discovery_rules>
                 <discovery_rule>
-                    <name>Traffic shaping rules</name>
+                    <name>Traffic shaping classes</name>
                     <type>0</type>
                     <snmp_community/>
                     <snmp_oid/>
                     <key>net.qdisc.lld</key>
-                    <delay>3600</delay>
+                    <delay>10</delay>
                     <status>0</status>
                     <allowed_hosts/>
                     <snmpv3_contextname/>
@@ -50,9 +50,22 @@
                     <privatekey/>
                     <port/>
                     <filter>
-                        <evaltype>0</evaltype>
+                        <evaltype>1</evaltype>
                         <formula/>
-                        <conditions/>
+                        <conditions>
+                            <condition>
+                                <macro>{#LEAF}</macro>
+                                <value>^1$</value>
+                                <operator>8</operator>
+                                <formulaid>A</formulaid>
+                            </condition>
+                            <condition>
+                                <macro>{#ROOT}</macro>
+                                <value>^0$</value>
+                                <operator>8</operator>
+                                <formulaid>B</formulaid>
+                            </condition>
+                        </conditions>
                     </filter>
                     <lifetime>30</lifetime>
                     <description/>
