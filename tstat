@@ -105,18 +105,32 @@ class QDiscStat(object):
 if __name__ == '__main__':
 
     import argparse
+    import sys
+    import json
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("classes", help="classes to display", nargs="*")
+    parser.add_argument("--lld", help="Zabbix low-level discovery", action="store_true")
     parser.add_argument("--interface", "-i", help="network interface to use", default=None)
     parser.add_argument("--raw", "-r", help="print raw sent bytes", action="store_true")
     args = parser.parse_args()
+
+    if args.lld:
+        lld_data = []
 
     for stat in QDiscStat.retrieve(interface=args.interface):
         if stat.class_type != 'htb':
             continue
         if args.classes and stat.class_name not in args.classes:
             continue
-        if args.raw:
+        if args.lld:
+            lld_data.append({
+                "{#IFACE}": stat.interface,
+                "{#CTYPE}": stat.class_type,
+                "{#CNAME}": stat.class_name,
+                "{#CHANDLE}": stat.class_handle,
+            })
+        elif args.raw:
             print(stat.sent_bytes)
             break
         else:
@@ -125,3 +139,6 @@ if __name__ == '__main__':
                 stat.class_name or stat.class_handle,
                 stat.sent_bytes
             ))
+
+    if args.lld:
+        print(json.dumps({"data": lld_data}))
