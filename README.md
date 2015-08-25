@@ -3,14 +3,23 @@ line with limited upload bandwidth.
 
 # Installation
 
-This script requires NetworkManager Dispatcher to work. Just type `make
-install` to install everything, and make sure that the dispatcher service is
-running.
+## Manual setup
 
-# Zabbix monitoring
+The main traffic shaping script is `shaper.sh`:
+
+    shaper.sh enp3s0 up    # Enables traffic shaping
+    shaper.sh enp3s0 down  # Disables traffic shaping
+
+## Automatic setup
+
+Enabling traffic shaping automatically requires NetworkManager Dispatcher to
+work. Just type `make install` to install everything, and make sure that the
+dispatcher service is running.
+
+## Zabbix monitoring
 
 Included are 3 files for monitoring traffic statistics with
-[Zazbbix](http://zabbix.com) :
+[Zabbix](http://zabbix.com) :
 
 * `tstat` collects class statistics and performs class discovery
 * `zabbix_userparams.conf` adds the required keys to a Zabbix Agent
