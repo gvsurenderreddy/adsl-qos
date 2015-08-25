@@ -18,8 +18,13 @@ from textwrap import dedent
 
 
 # Regular expression for determining the type, name and handle of a given class
-TC_CLASSTYPE = re.compile(
-    r"class (?P<class_type>\w+) (?:(?P<class_name>[\w:]+)#)?(?P<class_handle>[\w:]+)")
+TC_CLASSTYPE = re.compile("""
+  class\ (?P<class_type>\w+)                                              # Class type
+  (?:\ (?P<class_name>[\w:]+)\#)?(?P<class_handle>[\w:]+)                 # Name and handle
+  (?:\ (?P<root>root))?                                                   # Is this a root class?
+  (?:\ parent\ (?:(?P<parent_name>[\w:]+)\#)?(?P<parent_handle>[\w:]+))?  # Parent class
+  (?:\ (?P<leaf>leaf))?                                                   # Is this a leaf class?
+""", re.VERBOSE)
 
 # Full regular expression for each class type
 TC_CLASSRE = {k: [re.compile(l) for l in v] for k, v in {
@@ -54,6 +59,10 @@ class QDiscStat(object):
         self.class_type = m.group("class_type")
         self.class_name = m.group("class_name")
         self.class_handle = m.group("class_handle")
+        self.parent_name = m.group("parent_name")
+        self.parent_handle = m.group("parent_handle")
+        self.leaf = bool(m.group("leaf"))
+        self.root = bool(m.group("root"))
 
         # If the class type has a full re, run it
         self.values = {}
@@ -129,6 +138,8 @@ if __name__ == '__main__':
                 "{#CTYPE}": stat.class_type,
                 "{#CNAME}": stat.class_name,
                 "{#CHANDLE}": stat.class_handle,
+                "{#LEAF}": str(int(stat.leaf)),
+                "{#ROOT}": str(int(stat.root)),
             })
         elif args.raw:
             print(stat.sent_bytes)
