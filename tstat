@@ -1,72 +1,127 @@
 #!/usr/bin/python
 # coding=utf-8
 
-# Base Python File (tstat.py)
-# Created: Mon 06 Apr 2015 10:29:49 PM CEST
+# Base Python File (lld-tc.py)
+# Created: Tue 25 Aug 2015 05:53:47 PM CEST
 # Version: 1.0
 #
 # This Python script was developped by François-Xavier Thomas.
 # You are free to copy, adapt or modify it.
-# If you do so, however, leave my name somewhere in the credits, I'd appreciate it ;)
 #
 # (ɔ) François-Xavier Thomas <fx.thomas@gmail.com>
-
-import argparse
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("classes", help="classes to display", nargs="*")
-parser.add_argument("--interface", "-i", help="network interface to use", default="enp3s0")
-parser.add_argument("--raw", "-r", help="print raw sent bytes", action="store_true")
-args = parser.parse_args()
 
 
 import subprocess as sp
 import re
+import os
+from textwrap import dedent
+
+
+# Regular expression for determining the type, name and handle of a given class
+TC_CLASSTYPE = re.compile(
+    r"class (?P<class_type>\w+) (?:(?P<class_name>[\w:]+)#)?(?P<class_handle>[\w:]+)")
+
+# Full regular expression for each class type
+TC_CLASSRE = {k: [re.compile(l) for l in v] for k, v in {
+
+    'htb': [
+       "class htb .*",
+       "Sent (?P<sent_bytes>\d+) bytes (?P<sent_pkts>\d+) pkt \(dropped (?P<dropped>\d+), overlimits (?P<overlimits>\d+) requeues (?P<requeues>\d+)\)",
+       "rate (?P<rate_bps>\d+)bit (?P<rate_pps>\d+)pps backlog (?P<backlog_bytes>\d+)b (?P<backlog_pkts>\d+)p requeues (?P<backlog_requeues>\d+)",
+       "lended: (?P<lended>\d+) borrowed: (?P<borrowed>\d+) giants: (?P<giants>\d+)",
+       "tokens: (?P<tokens>[-\d]+) ctokens: (?P<ctokens>[-\d]+)",
+    ],
+
+    'sfq': [
+       "class sfq .*",
+       "\(dropped (?P<dropped>\d+), overlimits (?P<overlimits>\d+) requeues (?P<requeues>\d+)\)",
+       "backlog (?P<backlog_bytes>\d+)b (?P<backlog_pkts>\d+)p requeues (?P<backlog_requeues>\d+)",
+       "allot (?P<allot>\d+)",
+    ]
+
+}.items()}
 
 
 class QDiscStat(object):
-    def __init__(self):
-        self.lines = []
+    def __init__(self, data, interface):
 
-    def add(self, l):
-        self.lines.append(l.strip())
+        # Retrieve class name, type and handle
+        self.interface = interface
+        self.data = data
+        m = TC_CLASSTYPE.match(self.data)
+        if not m:
+            raise ValueError("data does not match expected output")
+        self.class_type = m.group("class_type")
+        self.class_name = m.group("class_name")
+        self.class_handle = m.group("class_handle")
 
-    @property
-    def sent_bytes(self):
-        return int(re.match(r"Sent (\d+) bytes", self.lines[1]).group(1))
+        # If the class type has a full re, run it
+        self.values = {}
+        classre = TC_CLASSRE.get(self.class_type, [])
+        for cre, line in zip(classre, self.data.split("\n")):
+            m = cre.match(line.strip())
+            if not m:
+                continue
+            for key, value in m.groupdict().items():
+                try:
+                    self.values[key] = int(value)
+                except:
+                    self.values[key] = value
 
-    @property
-    def sent_pkts(self):
-        return int(re.match(r"Sent \d+ bytes (\d+) pkt", self.lines[1]).group(1))
+    def __repr__(self):
+        return "<%s: %s %s)>" % (
+            self.interface, self.class_type,
+            self.class_name or self.class_handle)
 
-    @property
-    def dropped_pkts(self):
-        return int(re.match(r"Sent \d+ bytes \d+pkt (dropped (\d+)", self.lines[1]).group(1))
+    def __getattr__(self, key):
+        return self.values.get(key)
 
-    @property
-    def class_type(self):
-        return next(re.finditer(r"class (\w+)", self.lines[0])).group(1)
+    @classmethod
+    def retrieve(self, interface=None):
+        """Retrieve class statistics using the 'tc' command"""
 
-    @property
-    def class_name(self):
-        return next(re.finditer(r"class \w+ ([\w:]+)", self.lines[0])).group(1)
+        # If the 'interface' parameter is specified, retrieve statistics for the
+        # given interface ; otherwise, use all available interfaces.
+        interfaces = [interface] if interface else os.listdir("/sys/class/net/")
+        for interface in interfaces:
 
+            # Run the 'tc' command for the selected interface
+            tcstat = sp.check_output([
+                "tc",             # The 'tc' command from iproute2
+                "-name",          # Show class names from /etc/iproute2/tc_cls
+                "-s",             # Turn on statistics display
+                "class", "ls",    # Display classes...
+                "dev", interface  # ...for the selected network interface
+            ]).decode("utf-8")
 
-tcstat = sp.check_output(["tc", "-nm", "-s", "class", "ls", "dev", args.interface]).decode("utf-8")
-stats = []
-for line in tcstat.split("\n"):
-    if not line.strip():
-        continue
-    if not line.startswith(" "):
-        stats.append(QDiscStat())
-    stats[-1].add(line)
-if args.classes:
-    stats = [s for s in stats if s.class_name in args.classes]
-for s in stats:
-    if s.class_type != "htb":
-        continue
-    if args.classes and s.class_name not in args.classes:
-        continue
-    if args.raw:
-        print(s.sent_bytes)
-    else:
-        print("{} {} {}".format(s.class_type, s.class_name, s.sent_bytes))
+            # Parse each non-empty tc stats block (separated by 2 newlines) into
+            # QDiscStat objects for later processing.
+            for stat in tcstat.split("\n\n"):
+                stat = stat.strip()
+                if not stat:
+                    continue
+                yield QDiscStat(stat, interface)
+
+if __name__ == '__main__':
+
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("classes", help="classes to display", nargs="*")
+    parser.add_argument("--interface", "-i", help="network interface to use", default=None)
+    parser.add_argument("--raw", "-r", help="print raw sent bytes", action="store_true")
+    args = parser.parse_args()
+
+    for stat in QDiscStat.retrieve(interface=args.interface):
+        if stat.class_type != 'htb':
+            continue
+        if args.classes and stat.class_name not in args.classes:
+            continue
+        if args.raw:
+            print(stat.sent_bytes)
+            break
+        else:
+            print("%s %s %s" % (
+                stat.class_type,
+                stat.class_name or stat.class_handle,
+                stat.sent_bytes
+            ))
