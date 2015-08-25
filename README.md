@@ -1,5 +1,22 @@
-This is a small script to setup traffic shaping on a router box for an ADSL
-line with limited upload bandwidth.
+This is a small script that sets up traffic shaping on a Linux router box,
+using the `tc` command from `iproute2`.
+
+In the current setup, outgoing traffic is classified into the following
+classes, each having specific shaping rules:
+
+* LAN: No shaping
+* WAN: Capped at the maximum upload bandwith (85kbps)
+  * Priority 1: Highest priority (10kbps reserved)
+    * DNS
+    * Small TCP control packets (e.g. `SYN`, `ACK`, `RST`)
+  * Priority 2: High priority (70 kbps reserved)
+    * HTTP(S)
+    * SSH
+    * [Subsonic](http://subsonic.org) (a self-hosted music streaming server)
+    * Email
+  * Priority 3: Normal priority (default, 5kbps reserved)
+  * Priority 4: Low priority (5kbps reserved)
+    * Bittorrent traffic
 
 # Installation
 
@@ -34,8 +51,8 @@ then be used, e.g. for displaying stacked graphs like this one:
 
 # Configuration
 
-Your network characteristics will most probably not match mine (roughly 5M
-down, 700k up). The most important thing to edit is your maximum upload
+Your network characteristics will most probably not match mine (roughly 800kbps
+down, 85kbps up). The most important thing to edit is your maximum upload
 bandwith, defined in the `MAX_UPLOAD` variable.
 
 If your local network is not `192.168.1.0/24`, you also need to replace the
