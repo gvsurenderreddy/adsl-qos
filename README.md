@@ -1,14 +1,19 @@
 This is a small script to setup traffic shaping on a router box for an ADSL
 line with limited upload bandwidth.
 
-It does so by :
+# Installation
 
-* Setting a larger priority for special TCP packets influencing flow control.
-  Especially, TCP does not perform well if ACK packets are delayed, since it
-  cannot estimate packet loss properly.
+This script requires NetworkManager Dispatcher to work. Just type `make
+install` to install everything, and make sure that the dispatcher service is
+running.
 
-* Allowing some traffic (HTTP, SSH, DNS, ICMP) to have a higher priority than
-  other, bulk traffic.
+# Zabbix monitoring
 
-* All other kinds of packets go into the lowest priority mode: they can use the
-  full link as long as nobody else is using it.
+Included are 3 files for monitoring traffic statistics with
+[Zazbbix](http://zabbix.com) :
+
+* `tstat` collects class statistics and performs class discovery
+* `zabbix_userparams.conf` adds the required keys to a Zabbix Agent
+* `zabbix_template.xml` adds a _Traffic shaping_ template that automatically
+  adds items for every running traffic class defined in `tc_cls` using the
+  `tstat` command.
