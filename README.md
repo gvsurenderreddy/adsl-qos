@@ -27,6 +27,11 @@ Included are 3 files for monitoring traffic statistics with
   adds items for every running traffic class defined in `tc_cls` using the
   `tstat` command.
 
+The Zabbix template configures items for each non-root, leaf class. These can
+then be used, e.g. for displaying stacked graphs like this one:
+
+![Traffic shaping graph in Zabbix](.images/zabbix_shaping_graph.png?raw=true)
+
 # Configuration
 
 Your network characteristics will most probably not match mine (roughly 5M
