@@ -9,6 +9,7 @@
 # WAN 1: High priority
 1:111     dns
 1:112     tcp
+1:113     ipsec_control
 1:129     high_priority_others
 
 # WAN 2: Important traffic
@@ -16,4 +17,5 @@
 1:132     ssh
 1:133     subsonic
 1:134     mail
+1:135     ipsec_payload
 1:149     important_others

@@ -28,11 +28,13 @@ CLASS_WAN3=150
 CLASS_WAN4=170
 CLASS_WAN1_DNS=111
 CLASS_WAN1_TCP=112
+CLASS_WAN1_IPSEC_CONTROL=113
 CLASS_WAN1_OTHERS=129
 CLASS_WAN2_WEB=131
 CLASS_WAN2_SSH=132
 CLASS_WAN2_SUBSONIC=133
 CLASS_WAN2_MAIL=134
+CLASS_WAN2_IPSEC_PAYLOAD=135
 CLASS_WAN2_OTHERS=149
 
 # Local networks to use when filtering local packets.
@@ -133,14 +135,16 @@ if [[ $IFSTATUS == "up" ]]; then
   create_class $CLASS_WAN4 5kbps   ${CLASS_WAN}
 
   # Traffic-specific classes
-  create_class $CLASS_WAN1_DNS        1kbps   $CLASS_WAN1
-  create_class $CLASS_WAN1_TCP        1kbps   $CLASS_WAN1
-  create_class $CLASS_WAN1_OTHERS     1kbps   $CLASS_WAN1
-  create_class $CLASS_WAN2_WEB        1kbps   $CLASS_WAN2
-  create_class $CLASS_WAN2_SSH        1kbps   $CLASS_WAN2
-  create_class $CLASS_WAN2_SUBSONIC   1kbps   $CLASS_WAN2
-  create_class $CLASS_WAN2_MAIL       1kbps   $CLASS_WAN2
-  create_class $CLASS_WAN2_OTHERS     1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN1_DNS            1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN1_TCP            1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN1_IPSEC_CONTROL  1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN1_OTHERS         1kbps   $CLASS_WAN1
+  create_class $CLASS_WAN2_WEB            1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_SSH            1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_SUBSONIC       1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_MAIL           1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_IPSEC_PAYLOAD  1kbps   $CLASS_WAN2
+  create_class $CLASS_WAN2_OTHERS         1kbps   $CLASS_WAN2
 
   # Initialize iptable rules
   ip64tables_init
@@ -155,9 +159,10 @@ if [[ $IFSTATUS == "up" ]]; then
   accept_mark
 
   # Priority 2: Match high-priority packets (ICMP, DNS and small FIN/ACK/SYN).
-  rule -p tcp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
-  rule -p udp --dport 53 -j MARK --set-mark $CLASS_WAN1_DNS
-  rule -p icmp           -j MARK --set-mark $CLASS_WAN1_OTHERS
+  rule -p tcp --dport 53   -j MARK --set-mark $CLASS_WAN1_DNS
+  rule -p udp --dport 53   -j MARK --set-mark $CLASS_WAN1_DNS
+  rule -p icmp             -j MARK --set-mark $CLASS_WAN1_OTHERS
+  rule -p udp --sport 500  -j MARK --set-mark $CLASS_WAN1_IPSEC_CONTROL
   accept_mark
   rule -p tcp --tcp-flags FIN,SYN,RST,ACK ACK -m length --length 0:60 -j MARK --set-mark $CLASS_WAN1_TCP
   rule -p tcp --tcp-flags FIN,SYN,RST,ACK RST,ACK                     -j MARK --set-mark $CLASS_WAN1_TCP
@@ -167,7 +172,8 @@ if [[ $IFSTATUS == "up" ]]; then
   accept_mark
 
   # Priority 3: Match intermediate-priority packets.
-  rule -p gre              -j MARK --set-mark $CLASS_WAN2_OTHERS
+  rule -p esp              -j MARK --set-mark $CLASS_WAN2_IPSEC_PAYLOAD
+  rule -p udp --sport 4500 -j MARK --set-mark $CLASS_WAN2_IPSEC_PAYLOAD
   rule -p tcp --dport 1723 -j MARK --set-mark $CLASS_WAN2_OTHERS
   rule -p tcp --sport 1723 -j MARK --set-mark $CLASS_WAN2_OTHERS
   rule -p tcp --dport 5001 -j MARK --set-mark $CLASS_WAN2_OTHERS
