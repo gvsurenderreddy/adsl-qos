@@ -155,7 +155,10 @@ if [[ $IFSTATUS == "up" ]]; then
   # Initialize iptable rules
   ip64tables_init
 
-  # Priority 1: Match local packets.
+  # Priority 1: Match local or tunnelled packets.
+  iptables  -t mangle -A shaping -m policy --dir out --pol ipsec -j MARK --set-mark $CLASS_WAN2_IPSEC_PAYLOAD
+  ip6tables -t mangle -A shaping -m policy --dir out --pol ipsec -j MARK --set-mark $CLASS_WAN2_IPSEC_PAYLOAD
+  accept_mark
   iptables  -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV4 -j MARK --set-mark $CLASS_LAN
   ip6tables -t mangle -A shaping -o $IFNAME -d $LOCALNET_IPV6 -j MARK --set-mark $CLASS_LAN
   accept_mark
