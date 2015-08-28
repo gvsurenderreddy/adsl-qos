@@ -70,6 +70,12 @@ function rule() {
   ip64tables -t mangle -A shaping -o $IFNAME $*
 }
 
+# Trace packets in the syslog
+function trace() {
+  ip64tables -A PREROUTING -t raw $* -j TRACE
+  ip64tables -A OUTPUT -t raw -o $IFNAME $* -j TRACE
+}
+
 # Accept marked packets and return from the iptables chain without processing
 # other rules.
 function accept_mark() {
@@ -194,8 +200,8 @@ if [[ $IFSTATUS == "up" ]]; then
   rule -j MARK --set-mark $CLASS_WAN3
 
   # Packet tracing
-  # ip64tables -A PREROUTING -t raw -p tcp --dport 5001 -j TRACE
-  # ip64tables -A OUTPUT -t raw -o $IFNAME -p tcp --dport 5001 -j TRACE
+  #trace -p udp --sport 4500
+  #trace -p udp --sport 500
 
 # If the interface is being brought down, clear all traffic shaping rules.
 elif [[ $IFSTATUS == "down" ]]; then
